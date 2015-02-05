@@ -1,0 +1,8 @@
+function [V_x V_y V_theta]=unicylce_control(xd, yd,theta)
+kp=1;
+ktheta=1;
+%theta_d=atan2{xd,yd}-theta;
+
+u1=kp*(xd*cos(theta)+y*sin(theta));
+u2=ktheta*atan2(yd,xd)-theta;
+V_x=cos

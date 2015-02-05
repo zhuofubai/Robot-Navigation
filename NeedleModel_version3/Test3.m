@@ -1,0 +1,186 @@
+%Test2 Particle Filter for Needle Motion model
+clear all
+close all
+%set up an initially straight needle pointing straight along the z-axis
+clear all
+% close all
+clf
+
+%set up test parameters
+doVisualization = 1;
+nControlPoints = 3;
+nSteps = 10;
+
+%initialize the G, Gp and ABC
+Ginit = zeros(nControlPoints,3);
+Ginit(:,3) = 0:1:nControlPoints-1;
+
+Gpinit = zeros(nControlPoints,3);
+Gpinit(:,3) = 1;
+
+ABC = zeros(3,3,nControlPoints-1);
+for i=1:nControlPoints-1
+    ABC(:,:,i) = [0 0 0;
+        0 0 0;
+        i-1 1 0];
+end
+%set up the initial parameters for the splines
+%intially, they are all equal, and are straight lines pointing in the z
+%direction
+
+%set the current needle position and tangents
+G = Ginit;
+Gp = Gpinit;
+ABCinit = ABC;
+
+global totalDelta 
+totalDelta=0;
+
+% collect the actual needle motion data and sensor data
+temp=struct('G',[],'Gp',[],'ABC',[]);
+actual_needle_motion=[]; % store the data of actual needle motion in n time steps
+Z_img=[];   % store the data of z value of the data on the sensor image in n time steps
+X_img=[];   % store the data of x value of the data on the sensor image in n time steps
+Y_img=[];   % store the data of y value of the data on the sensor image in n time steps
+xx=0;yy=0;zz=0;
+for iStep=1:nSteps    
+[G,Gp,ABC]=needle_motion_model_3(nSteps,nControlPoints,G, Gp, ABC,iStep,doVisualization);
+temp.G=G;
+temp.Gp=Gp;
+temp.ABC=ABC;
+actual_needle_motion=[actual_needle_motion temp];
+zz=(G(nControlPoints,3)+G(nControlPoints-1,3))/2;  % zz is the imaging position, here we fix it at the middle of the last spline 
+Z_img=[Z_img zz];
+[xx yy INT]=find_position(zz,ABC, G);      % solve the zz's corresponding  x value and y value in the sensor image
+xx=xx+randn(1)*0.03;
+yy=yy+randn(1)*0.03;
+X_img=[X_img xx];
+Y_img=[Y_img yy];
+[xx yy INT]=find_position(zz,ABC, G);
+end
+%%
+% particle filter initialization
+hold on
+Needle_set=[];
+
+doVisualization=0;
+ParticleNum=300*nControlPoints;
+Wt=zeros(1,ParticleNum);
+%initialize each particles
+for i=1:ParticleNum
+    G0=Ginit;
+    %randomize the insertion point of each particle.
+    G0(:,2)=randn(1)*0.1;
+    G0(:,1)=randn(1)*0.1;
+    G0(:,3)=G0(:,3)-nControlPoints*0.1;
+    temp.G=G0;
+    temp.Gp=Gpinit;
+    temp.ABC=ABCinit;    
+    Wt(i)=1/ParticleNum;
+    % randomized the needle configuration of each particle.
+   for iStep=1:nControlPoints
+    [G,Gp,ABC]=needle_motion_model_4(nSteps,nControlPoints,temp.G, temp.Gp, temp.ABC,iStep,doVisualization);
+    temp.G=G;
+    temp.Gp=Gp; 
+    temp.ABC=ABC;  
+    end
+    
+    Needle_set=[Needle_set temp]; % store each particle's G, Gp and ABC
+end
+%plot the initialization
+figure,
+for i=1:length(Needle_set)
+    plot3(Needle_set(i).G(:,3),Needle_set(i).G(:,1),Needle_set(i).G(:,2),'ro');
+    hold on   
+end
+   
+xlabel('Z-axis')
+ylabel('X-axis')
+zlabel('Y-axis')
+        box on
+        grid on
+        axis([0,nControlPoints+nSteps*0.1+.5,-1,1,-1,1]);
+
+%%
+%test the performance of particle filters
+x_max=5; x_min=-5;y_max=5;y_min=-5;
+X_set=zeros(1,ParticleNum);Y_set=zeros(1,ParticleNum);
+estimation1=[];%store the estimated result by choosing maximum weight in each step
+%estimation2=[];%store the estimated result by choosing maximum density
+for iStep=1:nSteps
+    weight_sum=0;
+    
+    Xt(1)=X_img(iStep);Xt(2)=Y_img(iStep);Xt(3)=Z_img(iStep);
+    z_target=Z_img(iStep);
+    figure,
+    for i=1:length(Needle_set)
+        
+        doVisualization=0;
+        [G,Gp,ABC]=needle_motion_model_3(nSteps,nControlPoints,Needle_set(i).G, Needle_set(i).Gp, Needle_set(i).ABC,iStep,doVisualization);
+        Needle_set(i).G=G;
+        Needle_set(i).Gp=Gp;
+        Needle_set(i).ABC=ABC;
+        [xint yint INT]=find_position(z_target, Needle_set(i).ABC, Needle_set(i).G);
+%         if INT==false
+%             INT
+%         end
+        detect=true;
+        Wt(i)=needle_measurement_model(INT,xint,yint,x_max,x_min,y_max,y_min,Xt,detect); % weighted each paritcle based on their likelihood of observation
+        weight_sum=weight_sum+Wt(i);
+        X_set(i)= xint; Y_set(i)=yint;
+        %     i
+    end
+    %%
+    % find and store the particle who has the maximum weight.
+    Wt=Wt/weight_sum;
+    [max_val max_ind]=max(Wt);
+    estimation1=[estimation1 Needle_set(max_ind)];
+    max_x = X_set(max_ind); max_y=Y_set(max_ind);
+    
+   % Resampling paritcles based on their weights
+    [Needle_set]=low_variance_sampler(Needle_set,Wt);
+    
+    % [fx,xi] = ksdensity(X_set);
+    % [fy,yi] = ksdensity(Y_set);
+    % [max_x_den, max_x_den_ind]=max(fx);
+    % [max_y_den, max_y_den_ind]=max(fy);
+    % xi(max_x_den_ind)
+    % yi(max_y_den_ind)
+    %estimation2=[estimation2 Needle_set(max_ind)];
+    %%
+    %plot 
+    XData = [];
+    YData = [];
+    ZData = [];
+    ABC_p=actual_needle_motion(iStep).ABC;
+    G_p=actual_needle_motion(iStep).G;
+    for i=1:nControlPoints-1
+        a0 = ABC_p(1,1,i);
+        a1 = ABC_p(1,2,i);
+        a2 = ABC_p(1,3,i);
+        b0 = ABC_p(2,1,i);
+        b1 = ABC_p(2,2,i);
+        b2 = ABC_p(2,3,i);
+        c0 = ABC_p(3,1,i);
+        c1 = ABC_p(3,2,i);
+        c2 = ABC_p(3,3,i);
+        l = 0:.01:1;
+        XData = [XData a0 + a1*l + a2*l.^2];
+        YData = [YData b0 + b1*l + b2*l.^2];
+        ZData = [ZData c0 + c1*l + c2*l.^2];
+    end
+    plot3(G_p(:,3),G_p(:,1),G_p(:,2),'bo');
+    hold on
+    plot3(ZData,XData,YData,'b');
+    hold on
+    for i=1:length(Needle_set)
+        plot3(Needle_set(i).G(:,3),Needle_set(i).G(:,1),Needle_set(i).G(:,2),'ro');
+        hold on
+    end
+    xlabel('Z-axis')
+    ylabel('X-axis')
+    zlabel('Y-axis')
+    box on
+    grid on
+    axis([0,nControlPoints+nSteps*0.1+.5,-1,1,-1,1]);
+end

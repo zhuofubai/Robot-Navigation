@@ -1,0 +1,25 @@
+function discrete_histgram(xsize,ysize,zsize, max, St)
+bin_total=xsize*ysize*zsize;
+A=zeros(xsize,ysize,zsize);
+x=0;y=0;z=0;
+for i=0:size(St)
+    if (St(i).x>=0)
+        x=fix(St(i).x)+1;
+    else
+        x=fix(St(i).x)-1;
+    end
+    
+    if (St(i).y>=0)
+        y=fix(St(i).y)+1;
+    else
+        y=fix(St(i).y)-1;
+    end
+    
+    if (St(i).z>=0)
+        z=fix(St(i).z)+1;
+    else
+        z=fix(St(i).z)-1;
+    end
+    
+    A[x,y,z]
+end
